@@ -2,8 +2,9 @@
 #parsedxdiag.py
 # parse through a DXDiag report file and pull out the useful information
 # by Derek French
-# v1.11
-#- switching to def main(), print() formatting
+# v1.12
+#- (1.12) added User DPI
+#- (1.11) switching to def main(), print() formatting
 
 #imports
 from dxdiagfile import DXDiagFile
@@ -12,14 +13,14 @@ import sys
 
 #constants
 FILENAME_POS = 1
-VERSION = '1.11'
+VERSION = '1.12'
 
 #functions
 def ParseFile(fileName):
   dxDiag = DXDiagFile(fileName)
   sysInfo = dxDiag.systemInformation
   print(f"DxDiag Report Parser {VERSION}")
-  print('-------------------------')
+  print('--------------------------')
   print(f"Report time:      {sysInfo['reportTime']}")
   print(f"Computer Name:    {sysInfo['machineName']}")
   print(f"OS:               {sysInfo['osName']}")
@@ -35,6 +36,7 @@ def ParseFile(fileName):
   print(f"RAM:              {memoryString}")
   print(f"Page File:        {sysInfo['pageFile']}")
   print(f"DirectX:          {sysInfo['directXVersion']}")
+  print(f"User DPI:         {sysInfo['userDPI']}")
   print()
   #video displays
   displayNumber = 1

@@ -2,15 +2,23 @@
 #dxdiagfile.py
 # DXDiag.txt report file class
 # by Derek French
-# v0.12
+# v0.14
+#- (0.14) working on adding the decoding of Nvidia driver dates
+#- (0.13) added User DPI to ParseSystemInformation, working on adding the downloading of updated AMD driver decodes
 #- (0.12) added sanity check in AMD and NVIDIA decodes for when "Driver File Version: Unknown (Unknown)"
 #- (0.11) fixing up file handling and comments
 
 #imports
+import csv
 import os
+from urllib import request
 
 #constants
 FILE_DRIVERSAMD = 'driverDecodeAMD.csv'
+FILE_DRIVERSAMD_NEW = 'driverDecodeAMD_new.csv'
+URL_DRIVERSAMDDECODE = 'https://raw.githubusercontent.com/CrushBug/DXDiagParse/main/driverDecodeAMD.csv'
+FILE_DRIVERSNVIDIA = 'driverDecodeNvidia.csv'
+URL_DRIVERSNVIDIADECODE = 'https://raw.githubusercontent.com/CrushBug/DXDiagParse/main/driverDecodeNvidia.csv'
 
 #functions
 def DecodeAMDDriverVersion(driverString, driverVersions):
@@ -30,14 +38,14 @@ def DecodeAMDDriverVersion(driverString, driverVersions):
     decodedAMDString = "Adrenalin " + driverVersions[numbers]
   else:
     if majorVersion < 30:
-      decodedAMDString = driverString + " - unknown Adrenalin version, OLDER than September 2021"
+      decodedAMDString = driverString + " - unknown version, OLDER than September 2021"
     else:
-      decodedAMDString = driverString + " - unknown Adrenalin version"
+      decodedAMDString = driverString + " - unknown version"
   return decodedAMDString
 
-def DecodeNVIDIADriverVersion(driverString):
+def DecodeNVIDIADriverVersion(driverString, driverVersions):
   """
-  turn a DXDiag NVIDIA driver string from "30.00.0015.1179 (English)" OR "30.0.15.1179" to "511.79"
+  turn a DXDiag NVIDIA driver string from "30.00.0015.1179 (English)" to "511.79 - Tue Nov 14, 2023"
   """
   #NEW sanity check for when "Driver File Version: Unknown (Unknown)"
   if driverString.startswith('Unknown'): return "Unknown"
@@ -51,17 +59,24 @@ def DecodeNVIDIADriverVersion(driverString):
   majorVersion = index2[1:] + index3[:2]  #511
   minorVersion = index3[2:]               #79
   decodedNVIDIAString = majorVersion + '.' + minorVersion
-  if int(majorVersion) < 500: decodedNVIDIAString += " - OLDER than January 2022"
+  if int(majorVersion) < 500:
+    decodedNVIDIAString += " - OLDER than January 2023"
+  else:
+    #add in the driver release date
+    if decodedNVIDIAString in driverVersions:
+      decodedNVIDIAString += ' - ' + driverVersions[decodedNVIDIAString]
   return decodedNVIDIAString
 
 class DXDiagFile:
-  #shared dictionary of AMD driver versions
+  #shared dictionary of AMD and NVIDIA driver versions
   __driverVersionsAMD = {}
+  __driverVersionsNVIDIA = {}
 
   def __init__(self, reportFileName):
     self.__filename = reportFileName
     self.__filecontents = []
     self.__found = False
+    self.__AMDDriverVersionsUpdate = False
     #initialize all the details
     #System info results
     self.__systemInformation = {
@@ -75,7 +90,8 @@ class DXDiagFile:
       'memoryInMB': 0,
       'memoryInGB': 0,
       'pageFile': '',
-      'directXVersion': ''
+      'directXVersion': '',
+      'userDPI': ''
     }
     #DxDiag Notes
     self.__dxErrorNotes = []
@@ -95,7 +111,12 @@ class DXDiagFile:
     self.__drives = []
     #load up the AMD driver decode data
     self.__LoadAMDDriverVersions()
-    #read the entire file for easier processing
+    #check for AMD driver decode data update
+    self.__CheckForAMDDriverDataUpdate()
+    #load up the NVIDIA driver decode data
+    self.__LoadNVIDIADriverVersions()
+
+    #read the entire DXDiag file for easier processing
     if os.path.exists(self.__filename):
       with open(self.__filename, "r") as fh:
         self.__filecontents = fh.readlines()
@@ -103,17 +124,68 @@ class DXDiagFile:
       self.__ParseFile()
   #end __init__()
 
+  def __CheckForAMDDriverDataUpdate(self):
+    """
+    Check if there is a new version of AMD driver decode data on GitHub
+    """
+    #check local AMD driver data version
+    localAMDdbVersion = int(self.__driverVersionsAMD['version'])
+    #get first line of driverDecodeAMD.csv from GitHub
+    latestDriverAMDFile = request.urlopen(URL_DRIVERSAMDDECODE)
+    latestDriverAMDData = latestDriverAMDFile.read()
+    #get the first line, the version line, searching for a byte version of newline
+    newLinePos = latestDriverAMDData.find(b'\n')
+    if newLinePos > -1:
+      #found, get the version line, converting to a string
+      versionLine = latestDriverAMDData[:newLinePos].decode()
+      #split on comma
+      versionElements = versionLine.split(',')
+      #get the version number
+      latestAMDdbVersion = int(versionElements[1])
+      if latestAMDdbVersion > localAMDdbVersion:
+        print('Updating AMD Driver data from GitHub.')
+        print()
+        #save out latestDriverAMDData as FILE_DRIVERSAMD_NEW
+        if os.path.exists(FILE_DRIVERSAMD_NEW): os.remove(FILE_DRIVERSAMD_NEW)
+        newAMDDriverData = latestDriverAMDData.decode('utf-8')
+        with open(FILE_DRIVERSAMD_NEW, mode="w") as fhAMD:
+          fhAMD.write(newAMDDriverData)
+        #delete the old file and replace it with the new
+        if os.path.exists(FILE_DRIVERSAMD): os.remove(FILE_DRIVERSAMD)
+        os.rename(FILE_DRIVERSAMD_NEW, FILE_DRIVERSAMD)
+        #clear out the AMD driver dictionary and reload it from the updated file
+        self.__driverVersionsAMD.clear()
+        self.__LoadAMDDriverVersions()
+        #clean up the downloaded file
+        if os.path.exists(FILE_DRIVERSAMD_NEW): os.remove(FILE_DRIVERSAMD_NEW)
+  #end __CheckForAMDDriverDataUpdate()
+
   def __LoadAMDDriverVersions(self):
     """
     Load the driverDecodeAMD.csv file into the __driverVersionsAMD dictionary
     """
-    #TODO check if a new version, download, and use that
     if os.path.exists(FILE_DRIVERSAMD):
       with open(FILE_DRIVERSAMD, "r") as fhAMD:
         for driverLine in fhAMD:
           entry = driverLine.strip().split(',')
           self.__driverVersionsAMD[entry[0]] = entry[1]
   #end __LoadAMDDriverVersions()
+
+  def __LoadNVIDIADriverVersions(self):
+    """
+    Load the driverDecodeNvidia.csv file into the __driverVersionsNVIDIA dictionary
+    """
+    if os.path.exists(FILE_DRIVERSNVIDIA):
+      with open(FILE_DRIVERSNVIDIA, encoding="utf-8") as csvFile:
+        #csvDialect = csv.Sniffer().sniff(csvFile.read(1024))
+        #csvFile.seek(0)
+        #csvReader = csv.reader(csvFile, csvDialect, doublequote=True)
+        csvReader = csv.reader(csvFile, dialect='excel', doublequote=True)
+        for row in csvReader:
+          self.__driverVersionsNVIDIA[row[0]] = row[1]
+        #end for row
+      #end with open()
+  #end __LoadNVIDIADriverVersions()
 
   def __ParseFile(self):
     """
@@ -180,6 +252,7 @@ class DXDiagFile:
           self.__systemInformation['memoryInGB'] = memoryInGB
         if line.startswith('Page File:'): self.__systemInformation['pageFile'] = line[11:]
         if line.startswith('DirectX Version:'): self.__systemInformation['directXVersion'] = line[17:]
+        if line.startswith('User DPI Setting:'): self.__systemInformation['userDPI'] = line[18:]
         #stop when we hit the next "--------"... line
         if line.startswith('--------'): foundEnd = True
         if foundEnd: break
@@ -295,7 +368,7 @@ class DXDiagFile:
       #Intel Corporation
       #(Standardgrafikkartentypen)
       #NVIDIA
-      if self.__videoCardManufacturers[i].startswith('NVIDIA'): driverVersion = DecodeNVIDIADriverVersion(driverVersion)
+      if self.__videoCardManufacturers[i].startswith('NVIDIA'): driverVersion = DecodeNVIDIADriverVersion(driverVersion, self.__driverVersionsNVIDIA)
       #Advanced Micro Devices, Inc.
       if self.__videoCardManufacturers[i].startswith('Advanced Micro'): driverVersion = DecodeAMDDriverVersion(driverVersion, self.__driverVersionsAMD)
       cardData = {
@@ -401,16 +474,20 @@ class DXDiagFile:
   #end ParseDrives()
 
   @property
+  def AMDUpdate(self):
+    return self.__AMDDriverVersionsUpdate
+
+  @property
   def drives(self):
     """
-    Return a list of drive info dictionaries
+    Returns a list of drive info dictionaries
     """
     return self.__drives
 
   @property
   def dxErrorCount(self):
     """
-    Return an integer of the number of DXDiag errors
+    Returns an integer of the number of DXDiag errors
     """
     return len(self.__dxErrorNotes)
 
