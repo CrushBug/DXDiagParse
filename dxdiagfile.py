@@ -2,11 +2,12 @@
 #dxdiagfile.py
 # DXDiag.txt report file class
 # by Derek French
-# v0.14
-#- (0.14) working on adding the decoding of Nvidia driver dates
-#- (0.13) added User DPI to ParseSystemInformation, working on adding the downloading of updated AMD driver decodes
-#- (0.12) added sanity check in AMD and NVIDIA decodes for when "Driver File Version: Unknown (Unknown)"
-#- (0.11) fixing up file handling and comments
+#v0.15
+# 0.15 - added checking for encoding readable DxDiag.txt file format first
+# 0.14 - working on adding the decoding of Nvidia driver dates
+# 0.13 - added User DPI to ParseSystemInformation, working on adding the downloading of updated AMD driver decodes
+# 0.12 - added sanity check in AMD and NVIDIA decodes for when "Driver File Version: Unknown (Unknown)"
+# 0.11 - fixing up file handling and comments
 
 #imports
 import csv
@@ -76,8 +77,15 @@ class DXDiagFile:
     self.__filename = reportFileName
     self.__filecontents = []
     self.__found = False
-    self.__AMDDriverVersionsUpdate = False
+    self.__valid = False
+    #check if the file is in a valid encoding format
+    if os.path.exists(self.__filename):
+      self.__found = True
+    else:
+      #file missing, so just return
+      return
     #initialize all the details
+    self.__AMDDriverVersionsUpdate = False
     #System info results
     self.__systemInformation = {
       'reportTime': '',
@@ -115,13 +123,17 @@ class DXDiagFile:
     self.__CheckForAMDDriverDataUpdate()
     #load up the NVIDIA driver decode data
     self.__LoadNVIDIADriverVersions()
-
     #read the entire DXDiag file for easier processing
-    if os.path.exists(self.__filename):
-      with open(self.__filename, "r") as fh:
-        self.__filecontents = fh.readlines()
-      self.__found = True
-      self.__ParseFile()
+    if self.__found is True:
+      try:
+        with open(self.__filename, "r") as fh:
+          self.__filecontents = fh.readlines()
+        self.__valid = True
+      except:
+        #file read problem, so just return
+        return
+      if self.__valid is True:
+        self.__ParseFile()
   #end __init__()
 
   def __CheckForAMDDriverDataUpdate(self):
@@ -146,18 +158,21 @@ class DXDiagFile:
         print('Updating AMD Driver data from GitHub.')
         print()
         #save out latestDriverAMDData as FILE_DRIVERSAMD_NEW
-        if os.path.exists(FILE_DRIVERSAMD_NEW): os.remove(FILE_DRIVERSAMD_NEW)
+        if os.path.exists(FILE_DRIVERSAMD_NEW):
+          os.remove(FILE_DRIVERSAMD_NEW)
         newAMDDriverData = latestDriverAMDData.decode('utf-8')
         with open(FILE_DRIVERSAMD_NEW, mode="w") as fhAMD:
           fhAMD.write(newAMDDriverData)
         #delete the old file and replace it with the new
-        if os.path.exists(FILE_DRIVERSAMD): os.remove(FILE_DRIVERSAMD)
+        if os.path.exists(FILE_DRIVERSAMD):
+          os.remove(FILE_DRIVERSAMD)
         os.rename(FILE_DRIVERSAMD_NEW, FILE_DRIVERSAMD)
         #clear out the AMD driver dictionary and reload it from the updated file
         self.__driverVersionsAMD.clear()
         self.__LoadAMDDriverVersions()
         #clean up the downloaded file
-        if os.path.exists(FILE_DRIVERSAMD_NEW): os.remove(FILE_DRIVERSAMD_NEW)
+        if os.path.exists(FILE_DRIVERSAMD_NEW):
+          os.remove(FILE_DRIVERSAMD_NEW)
   #end __CheckForAMDDriverDataUpdate()
 
   def __LoadAMDDriverVersions(self):
@@ -532,3 +547,10 @@ class DXDiagFile:
     Return a list of dictionaries of detected video devices
     """
     return self.__videoDisplays
+
+  @property
+  def valid(self):
+    """
+    Return a boolean if the specified file was valid
+    """
+    return self.__valid

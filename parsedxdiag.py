@@ -2,9 +2,10 @@
 #parsedxdiag.py
 # parse through a DXDiag report file and pull out the useful information
 # by Derek French
-# v1.12
-#- (1.12) added User DPI
-#- (1.11) switching to def main(), print() formatting
+# v1.13
+#- 1.13 - added checking for valid report file encoding format
+#- 1.12 - added User DPI
+#- 1.11 - switching to def main(), print() formatting
 
 #imports
 from dxdiagfile import DXDiagFile
@@ -18,6 +19,9 @@ VERSION = '1.12'
 #functions
 def ParseFile(fileName):
   dxDiag = DXDiagFile(fileName)
+  if dxDiag.valid is False:
+    print(f"Failed to read report file {fileName}; check report file encoding.")
+    sys.exit()
   sysInfo = dxDiag.systemInformation
   print(f"DxDiag Report Parser {VERSION}")
   print('--------------------------')
